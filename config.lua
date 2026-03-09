@@ -7,8 +7,7 @@ local cfg = {}
 -- ["drop of Molten SpaceTime"] = {1000000, 1, "spacetime"} -- fluid drop with threshold and fluid name
 
 cfg["items"] = {
-    ["drop of Molten SpaceTime"] = {nil, 1, "spacetime"},
-    ["drop of Molten White Dwarf Matter"] = {nil, 1, "white_dwarf_matter"}
+    ["Agar"] = {1500000000, 1000000000}
 }
 
 cfg["sleep"] = 10
