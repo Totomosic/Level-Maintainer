@@ -15,7 +15,7 @@ Also supports having a threshold.
 Download it
 
 ```bash
-wget raw.githubusercontent.com/Echoloquate/Level-Maintainer/master/installer.lua && installer
+wget raw.githubusercontent.com/totomosic/Level-Maintainer/master/installer.lua && installer
 ```
 
 Run it
