@@ -26,7 +26,7 @@ Maintainer
 
 # Config
 
-You can change maintained items in `config.lua`. Pattern is as follows: `["item_name"] = {threshold, batch_size}` as well as the time inbetween craft checks.
+You can change maintained items in `config.lua`. Pattern is as follows: `["item_name"] = {threshold, batch_size, fluid_name, priority}` as well as the time inbetween craft checks.
 
 Optional remote config sync:
 

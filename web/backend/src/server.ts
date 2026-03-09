@@ -78,6 +78,20 @@ function asNullableString(value: unknown): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function asPriority(value: unknown): "standard" | "low" {
+  const parsed = asNullableString(value);
+  if (parsed === null) {
+    return "standard";
+  }
+
+  const normalized = parsed.toLowerCase();
+  if (normalized === "standard" || normalized === "low") {
+    return normalized;
+  }
+
+  throw new Error("priority must be either 'standard' or 'low'.");
+}
+
 app.use(cors());
 app.use(express.json());
 
@@ -121,6 +135,7 @@ app.post("/api/items", async (req, res, next) => {
       threshold: asNullableNumber(body.threshold),
       batchSize: asNullableNumber(body.batchSize),
       fluidName: asNullableString(body.fluidName),
+      priority: asPriority(body.priority),
       group: asNullableString(body.group),
     };
 

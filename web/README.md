@@ -11,7 +11,7 @@ Simple web editor for `Level-Maintainer/config.lua`.
 
 - `GET /config` returns the raw `config.lua` file
 - `GET /api/items` returns parsed `cfg["items"]`
-- `POST /api/items` adds or updates one item entry in `cfg["items"]` (optional `group` string)
+- `POST /api/items` adds or updates one item entry in `cfg["items"]` (optional `group`, `priority` of `standard|low`)
 - `DELETE /api/items/:name` removes one item entry
 - `GET /api/sleep` returns `cfg["sleep"]`
 - `PUT /api/sleep` updates `cfg["sleep"]`
@@ -27,7 +27,7 @@ Item groups are optional labels and are stored only as comments in `config.lua`,
 
 ```lua
 -- @group: AE2 Drops
-["drop of Molten SpaceTime"] = {nil, 1, "spacetime"},
+["drop of Molten SpaceTime"] = {nil, 1, "spacetime", "standard"},
 ```
 
 In the UI, configured items are shown by group and each row has a group dropdown to move the item between existing groups (or to `Ungrouped`).

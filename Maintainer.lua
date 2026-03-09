@@ -19,6 +19,7 @@ end
 local CONFIG_POLL_INTERVAL = 60
 local nextConfigPoll = 0
 local lastRemoteConfigRaw = nil
+local LOW_PRIORITY_MAX_CRAFTING = 10
 
 local function countItems(list)
     local count = 0
@@ -61,6 +62,33 @@ local function parseConfigString(rawConfig, sourceName)
         sleep = math.floor(parsedSleep + 0),
         config_url = parsed.config_url
     }
+end
+
+local function resolvePriority(rawPriority)
+    if type(rawPriority) ~= "string" then
+        return "standard"
+    end
+
+    local normalized = string.lower(rawPriority)
+    if normalized == "low" then
+        return "low"
+    end
+
+    return "standard"
+end
+
+local function getCraftingState(itemsCrafting, configuredItems)
+    local activeCraftingCount = 0
+    local hasExternalCrafting = false
+
+    for craftingItem in pairs(itemsCrafting) do
+        activeCraftingCount = activeCraftingCount + 1
+        if configuredItems[craftingItem] == nil then
+            hasExternalCrafting = true
+        end
+    end
+
+    return activeCraftingCount, hasExternalCrafting
 end
 
 local function fetchRemoteConfigBody(url)
@@ -130,13 +158,42 @@ pollRemoteConfig(true)
 while true do
     pollRemoteConfig(false)
     local itemsCrafting = ae2.checkIfCrafting()
+    local activeCraftingCount, hasExternalCrafting = getCraftingState(itemsCrafting, items)
 
     for item, config in pairs(items) do
-        if itemsCrafting[item] == true then
+        if type(config) ~= "table" then
+            logInfo("Invalid config for " .. tostring(item) .. ", expected table, skipping...")
+        elseif itemsCrafting[item] == true then
             logInfo(item .. " is already being crafted, skipping...")
         else
-            local success, answer = ae2.requestItem(item, config[1], config[2], config[3])
-            logInfo(answer)
+            local priority = resolvePriority(config[4])
+            local shouldRequest = true
+
+            if priority == "low" then
+                if activeCraftingCount >= LOW_PRIORITY_MAX_CRAFTING then
+                    shouldRequest = false
+                    logInfo(
+                        "Skipping low priority item " .. item .. ": "
+                        .. tostring(activeCraftingCount)
+                        .. " crafts in progress (limit "
+                        .. tostring(LOW_PRIORITY_MAX_CRAFTING - 1)
+                        .. ")."
+                    )
+                elseif hasExternalCrafting then
+                    shouldRequest = false
+                    logInfo("Skipping low priority item " .. item .. ": external (non-maintainer) crafts are active.")
+                end
+            end
+
+            if shouldRequest then
+                local success, answer = ae2.requestItem(item, config[1], config[2], config[3])
+                logInfo(answer)
+
+                if success and itemsCrafting[item] ~= true then
+                    itemsCrafting[item] = true
+                    activeCraftingCount = activeCraftingCount + 1
+                end
+            end
         end
 
     end

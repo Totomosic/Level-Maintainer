@@ -6,6 +6,7 @@ interface ItemEntry {
   threshold: number | null;
   batchSize: number | null;
   fluidName: string | null;
+  priority: "standard" | "low";
   group: string | null;
 }
 
@@ -14,6 +15,7 @@ interface ItemEditDraft {
   threshold: string;
   batchSize: string;
   fluidName: string;
+  priority: "standard" | "low";
   group: string;
 }
 
@@ -28,6 +30,28 @@ interface NumberSuffix {
   suffix: string;
 }
 
+interface ItemPayload {
+  name: string;
+  threshold: string;
+  batchSize: string;
+  fluidName: string | null;
+  priority: "standard" | "low";
+  group: string | null;
+}
+
+interface NamingSuggestion {
+  field: "name" | "fluidName";
+  current: string;
+  suggested: string;
+}
+
+interface NamingWarningState {
+  context: "add" | "inline";
+  originalName: string | null;
+  payload: ItemPayload;
+  suggestions: NamingSuggestion[];
+}
+
 const items = ref<ItemEntry[]>([]);
 const configPreview = ref("");
 const loading = ref(false);
@@ -38,12 +62,14 @@ const movingGroupItemName = ref<string | null>(null);
 const error = ref("");
 const sleepInput = ref("");
 const editingOriginalName = ref<string | null>(null);
+const namingWarning = ref<NamingWarningState | null>(null);
 
 const form = reactive({
   name: "",
   threshold: "",
   batchSize: "1",
   fluidName: "",
+  priority: "standard" as "standard" | "low",
   group: "",
 });
 
@@ -52,6 +78,7 @@ const inlineDraft = reactive<ItemEditDraft>({
   threshold: "",
   batchSize: "",
   fluidName: "",
+  priority: "standard",
   group: "",
 });
 
@@ -122,6 +149,57 @@ function formatDisplayNumber(value: number | null): string {
     return "-";
   }
   return formatWithSuffix(value);
+}
+
+function normalizeSpaces(value: string): string {
+  return value.trim().replace(/\s+/g, " ");
+}
+
+function toTitleCaseWords(value: string): string {
+  return normalizeSpaces(value)
+    .split(" ")
+    .filter((word) => word.length > 0)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
+function normalizeItemNameForSuggestion(name: string): string {
+  const normalized = normalizeSpaces(name);
+  const dropMatch = /^drop of\s+(.+)$/i.exec(normalized);
+  if (dropMatch) {
+    return `drop of ${toTitleCaseWords(dropMatch[1])}`;
+  }
+  return toTitleCaseWords(normalized);
+}
+
+function normalizeFluidNameForSuggestion(fluidName: string): string {
+  return fluidName.trim().toLowerCase().replace(/\s+/g, "");
+}
+
+function collectNamingSuggestions(name: string, fluidName: string | null): NamingSuggestion[] {
+  const suggestions: NamingSuggestion[] = [];
+
+  const suggestedItemName = normalizeItemNameForSuggestion(name);
+  if (name !== suggestedItemName) {
+    suggestions.push({
+      field: "name",
+      current: name,
+      suggested: suggestedItemName,
+    });
+  }
+
+  if (fluidName !== null) {
+    const suggestedFluidName = normalizeFluidNameForSuggestion(fluidName);
+    if (fluidName !== suggestedFluidName) {
+      suggestions.push({
+        field: "fluidName",
+        current: fluidName,
+        suggested: suggestedFluidName,
+      });
+    }
+  }
+
+  return suggestions;
 }
 
 async function loadItems(): Promise<void> {
@@ -203,13 +281,93 @@ async function saveSleep(): Promise<void> {
   }
 }
 
-async function addItem(): Promise<void> {
-  if (!canSubmit.value) {
+function buildFormPayload(): ItemPayload {
+  return {
+    name: form.name.trim(),
+    threshold: form.threshold.trim(),
+    batchSize: form.batchSize.trim(),
+    fluidName: form.fluidName.trim().length === 0 ? null : form.fluidName.trim(),
+    priority: form.priority,
+    group: form.group.trim().length === 0 ? null : form.group.trim(),
+  };
+}
+
+function buildInlinePayload(): ItemPayload {
+  return {
+    name: inlineDraft.name.trim(),
+    threshold: inlineDraft.threshold.trim(),
+    batchSize: inlineDraft.batchSize.trim(),
+    fluidName: inlineDraft.fluidName.trim().length === 0 ? null : inlineDraft.fluidName.trim(),
+    priority: inlineDraft.priority,
+    group: inlineDraft.group.trim().length === 0 ? null : inlineDraft.group.trim(),
+  };
+}
+
+function applyPayloadToForm(payload: ItemPayload): void {
+  form.name = payload.name;
+  form.threshold = payload.threshold;
+  form.batchSize = payload.batchSize;
+  form.fluidName = payload.fluidName ?? "";
+  form.priority = payload.priority;
+  form.group = payload.group ?? "";
+}
+
+function applyPayloadToInline(payload: ItemPayload): void {
+  inlineDraft.name = payload.name;
+  inlineDraft.threshold = payload.threshold;
+  inlineDraft.batchSize = payload.batchSize;
+  inlineDraft.fluidName = payload.fluidName ?? "";
+  inlineDraft.priority = payload.priority;
+  inlineDraft.group = payload.group ?? "";
+}
+
+function validateItemPayload(payload: ItemPayload): string | null {
+  if (payload.name.length === 0) {
+    return "Item name is required.";
+  }
+
+  if (payload.batchSize.length === 0) {
+    return "Batch size is required.";
+  }
+
+  if (/^drop of\b/i.test(payload.name) && (payload.fluidName === null || payload.fluidName.length === 0)) {
+    return "Fluid name is required when item name begins with 'drop of'.";
+  }
+
+  if (payload.priority !== "standard" && payload.priority !== "low") {
+    return "Priority must be either 'standard' or 'low'.";
+  }
+
+  return null;
+}
+
+function maybeCreateNamingWarning(
+  context: "add" | "inline",
+  payload: ItemPayload,
+  originalName: string | null,
+): boolean {
+  const suggestions = collectNamingSuggestions(payload.name, payload.fluidName);
+  if (suggestions.length === 0) {
+    return false;
+  }
+
+  namingWarning.value = {
+    context,
+    originalName,
+    payload: { ...payload },
+    suggestions,
+  };
+  return true;
+}
+
+async function submitAddPayload(payload: ItemPayload, skipNamingWarning: boolean): Promise<void> {
+  const validationError = validateItemPayload(payload);
+  if (validationError) {
+    error.value = validationError;
     return;
   }
 
-  if (addFormRequiresFluid.value && form.fluidName.trim().length === 0) {
-    error.value = "Fluid name is required when item name begins with 'drop of'.";
+  if (!skipNamingWarning && maybeCreateNamingWarning("add", payload, null)) {
     return;
   }
 
@@ -217,14 +375,6 @@ async function addItem(): Promise<void> {
   error.value = "";
 
   try {
-    const payload = {
-      name: form.name.trim(),
-      threshold: form.threshold.trim(),
-      batchSize: form.batchSize.trim(),
-      fluidName: form.fluidName.trim().length === 0 ? null : form.fluidName.trim(),
-      group: form.group.trim().length === 0 ? null : form.group.trim(),
-    };
-
     const response = await fetch("/api/items", {
       method: "POST",
       headers: {
@@ -243,7 +393,9 @@ async function addItem(): Promise<void> {
     form.threshold = "";
     form.batchSize = "1";
     form.fluidName = "";
+    form.priority = "standard";
     form.group = "";
+    namingWarning.value = null;
 
     await loadConfigPreview();
   } catch (cause) {
@@ -253,12 +405,22 @@ async function addItem(): Promise<void> {
   }
 }
 
+async function addItem(): Promise<void> {
+  if (!canSubmit.value) {
+    return;
+  }
+
+  const payload = buildFormPayload();
+  await submitAddPayload(payload, false);
+}
+
 function startInlineEdit(item: ItemEntry): void {
   editingOriginalName.value = item.name;
   inlineDraft.name = item.name;
   inlineDraft.threshold = item.threshold === null ? "" : formatWithSuffix(item.threshold);
   inlineDraft.batchSize = item.batchSize === null ? "" : formatWithSuffix(item.batchSize);
   inlineDraft.fluidName = item.fluidName ?? "";
+  inlineDraft.priority = item.priority;
   inlineDraft.group = item.group ?? "";
 }
 
@@ -310,6 +472,7 @@ async function moveItemToGroup(item: ItemEntry, rawGroup: string): Promise<void>
         threshold: item.threshold,
         batchSize: item.batchSize,
         fluidName: item.fluidName,
+        priority: item.priority,
         group: nextGroup,
       }),
     });
@@ -339,27 +502,22 @@ function onGroupChange(item: ItemEntry, event: Event): void {
   void moveItemToGroup(item, target.value);
 }
 
-async function saveInlineEdit(): Promise<void> {
-  if (!editingOriginalName.value) {
+function isFluidItem(item: ItemEntry): boolean {
+  return item.fluidName !== null || /^drop of\b/i.test(item.name);
+}
+
+async function submitInlinePayload(
+  payload: ItemPayload,
+  originalName: string,
+  skipNamingWarning: boolean,
+): Promise<void> {
+  const validationError = validateItemPayload(payload);
+  if (validationError) {
+    error.value = validationError;
     return;
   }
 
-  const originalName = editingOriginalName.value;
-  const payload = {
-    name: inlineDraft.name.trim(),
-    threshold: inlineDraft.threshold.trim(),
-    batchSize: inlineDraft.batchSize.trim(),
-    fluidName: inlineDraft.fluidName.trim().length === 0 ? null : inlineDraft.fluidName.trim(),
-    group: inlineDraft.group.trim().length === 0 ? null : inlineDraft.group.trim(),
-  };
-
-  if (payload.name.length === 0) {
-    error.value = "Item name is required.";
-    return;
-  }
-
-  if (/^drop of\b/i.test(payload.name) && (payload.fluidName === null || payload.fluidName.length === 0)) {
-    error.value = "Fluid name is required when item name begins with 'drop of'.";
+  if (!skipNamingWarning && maybeCreateNamingWarning("inline", payload, originalName)) {
     return;
   }
 
@@ -391,6 +549,7 @@ async function saveInlineEdit(): Promise<void> {
     }
 
     editingOriginalName.value = null;
+    namingWarning.value = null;
     await loadItems();
     await loadConfigPreview();
   } catch (cause) {
@@ -398,6 +557,71 @@ async function saveInlineEdit(): Promise<void> {
   } finally {
     savingInline.value = false;
   }
+}
+
+async function saveInlineEdit(): Promise<void> {
+  if (!editingOriginalName.value) {
+    return;
+  }
+
+  const originalName = editingOriginalName.value;
+  const payload = buildInlinePayload();
+  await submitInlinePayload(payload, originalName, false);
+}
+
+async function acceptNamingSuggestion(): Promise<void> {
+  if (!namingWarning.value) {
+    return;
+  }
+
+  const warning = namingWarning.value;
+  const nextPayload: ItemPayload = {
+    ...warning.payload,
+  };
+
+  for (const suggestion of warning.suggestions) {
+    if (suggestion.field === "name") {
+      nextPayload.name = suggestion.suggested;
+    } else if (suggestion.field === "fluidName") {
+      nextPayload.fluidName = suggestion.suggested;
+    }
+  }
+
+  if (warning.context === "add") {
+    applyPayloadToForm(nextPayload);
+    namingWarning.value = null;
+    await submitAddPayload(nextPayload, true);
+    return;
+  }
+
+  if (!warning.originalName) {
+    namingWarning.value = null;
+    return;
+  }
+
+  applyPayloadToInline(nextPayload);
+  namingWarning.value = null;
+  await submitInlinePayload(nextPayload, warning.originalName, true);
+}
+
+async function rejectNamingSuggestion(): Promise<void> {
+  if (!namingWarning.value) {
+    return;
+  }
+
+  const warning = namingWarning.value;
+  namingWarning.value = null;
+
+  if (warning.context === "add") {
+    await submitAddPayload(warning.payload, true);
+    return;
+  }
+
+  if (!warning.originalName) {
+    return;
+  }
+
+  await submitInlinePayload(warning.payload, warning.originalName, true);
 }
 
 async function removeItem(name: string): Promise<void> {
@@ -447,8 +671,20 @@ onMounted(async () => {
       </p>
       <p class="hint">
         Example: name <code>drop of Molten SpaceTime</code>, threshold <code>1m</code>, batch <code>1k</code>, fluid
-        <code>spacetime</code>, group <code>AE2 Drops</code>.
+        <code>spacetime</code>, priority <code>standard</code>, group <code>AE2 Drops</code>.
       </p>
+
+      <div v-if="namingWarning" class="warning-box">
+        <p class="warning-title">Name formatting suggestion</p>
+        <p v-for="suggestion in namingWarning.suggestions" :key="`${namingWarning.context}-${suggestion.field}`" class="warning-line">
+          {{ suggestion.field === "name" ? "Item name" : "Fluid name" }}:
+          <code>{{ suggestion.current }}</code> -> <code>{{ suggestion.suggested }}</code>
+        </p>
+        <div class="warning-actions">
+          <button class="secondary" type="button" @click="acceptNamingSuggestion">Use suggestion</button>
+          <button class="secondary" type="button" @click="rejectNamingSuggestion">Keep original</button>
+        </div>
+      </div>
 
       <form class="item-form" @submit.prevent="addItem">
         <label>
@@ -473,6 +709,22 @@ onMounted(async () => {
             :required="addFormRequiresFluid"
             :placeholder="addFormRequiresFluid ? 'required for drop of*' : 'spacetime'"
           />
+        </label>
+
+        <label>
+          <span class="inline-with-tooltip">
+            Priority
+            <span
+              class="info-tooltip"
+              title="standard: normal crafting behavior. low: only crafts when fewer than 10 crafts are active and no non-maintainer crafts are running."
+            >
+              ?
+            </span>
+          </span>
+          <select v-model="form.priority">
+            <option value="standard">standard</option>
+            <option value="low">low</option>
+          </select>
         </label>
 
         <label>
@@ -504,12 +756,23 @@ onMounted(async () => {
                 <th>Threshold</th>
                 <th>Batch</th>
                 <th>Fluid</th>
+                <th>
+                  <span class="inline-with-tooltip">
+                    Priority
+                    <span
+                      class="info-tooltip"
+                      title="standard: normal crafting behavior. low: only crafts when fewer than 10 crafts are active and no non-maintainer crafts are running."
+                    >
+                      ?
+                    </span>
+                  </span>
+                </th>
                 <th>Group</th>
                 <th></th>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="item in section.items" :key="item.name">
+              <tr v-for="item in section.items" :key="item.name" :class="isFluidItem(item) ? 'row-fluid' : 'row-item'">
                 <td class="editable-cell" @click="activateInlineEdit(item)">
                   <input
                     v-if="editingOriginalName === item.name"
@@ -559,6 +822,19 @@ onMounted(async () => {
                     @keydown.esc.prevent="cancelInlineEdit"
                   />
                   <span v-else>{{ item.fluidName ?? "-" }}</span>
+                </td>
+                <td class="editable-cell" @click="activateInlineEdit(item)">
+                  <select
+                    v-if="editingOriginalName === item.name"
+                    v-model="inlineDraft.priority"
+                    @click.stop
+                    @keydown.enter.prevent="saveInlineEdit"
+                    @keydown.esc.prevent="cancelInlineEdit"
+                  >
+                    <option value="standard">standard</option>
+                    <option value="low">low</option>
+                  </select>
+                  <span v-else>{{ item.priority }}</span>
                 </td>
                 <td>
                   <select

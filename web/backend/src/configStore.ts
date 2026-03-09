@@ -5,6 +5,7 @@ export interface ItemEntry {
   threshold: number | null;
   batchSize: number | null;
   fluidName: string | null;
+  priority: "standard" | "low";
   group: string | null;
 }
 
@@ -170,7 +171,8 @@ function parseItemsBlock(itemsBlock: string): Record<string, ItemEntry> {
 
     const threshold = parseScalar(tupleParts[0]);
     const batchSize = parseScalar(tupleParts[1]);
-    const fluidName = parseScalar(tupleParts[2]);
+    const thirdValue = parseScalar(tupleParts[2]);
+    const fourthValue = parseScalar(tupleParts[3]);
 
     if (threshold !== null && typeof threshold !== "number") {
       throw new Error(`Invalid threshold for ${rawName}.`);
@@ -178,8 +180,34 @@ function parseItemsBlock(itemsBlock: string): Record<string, ItemEntry> {
     if (batchSize !== null && typeof batchSize !== "number") {
       throw new Error(`Invalid batch_size for ${rawName}.`);
     }
-    if (fluidName !== null && typeof fluidName !== "string") {
+
+    let fluidName: string | null = null;
+    let priority: "standard" | "low" = "standard";
+    const normalizedThird = typeof thirdValue === "string" ? thirdValue.toLowerCase() : null;
+    const normalizedFourth = typeof fourthValue === "string" ? fourthValue.toLowerCase() : null;
+
+    if (thirdValue !== null && typeof thirdValue !== "string") {
       throw new Error(`Invalid fluid_name for ${rawName}.`);
+    }
+    if (fourthValue !== null && typeof fourthValue !== "string") {
+      throw new Error(`Invalid priority for ${rawName}.`);
+    }
+
+    if (normalizedFourth !== null && normalizedFourth !== "standard" && normalizedFourth !== "low") {
+      throw new Error(`Invalid priority for ${rawName}.`);
+    }
+
+    // Legacy shorthand: third tuple value used as priority for non-fluid items.
+    if (fourthValue === null && (normalizedThird === "standard" || normalizedThird === "low")) {
+      fluidName = null;
+      priority = normalizedThird;
+    } else {
+      fluidName = thirdValue;
+      priority = normalizedFourth ?? "standard";
+    }
+
+    if (priority !== "standard" && priority !== "low") {
+      throw new Error(`Invalid priority for ${rawName}.`);
     }
 
     const name = parseLuaString(`"${rawName}"`);
@@ -188,6 +216,7 @@ function parseItemsBlock(itemsBlock: string): Record<string, ItemEntry> {
       threshold,
       batchSize,
       fluidName,
+      priority,
       group: currentGroup,
     };
   }
@@ -230,11 +259,9 @@ function serializeItems(entries: Record<string, ItemEntry>): string {
       const base = [
         entry.threshold === null ? "nil" : String(entry.threshold),
         entry.batchSize === null ? "nil" : String(entry.batchSize),
+        entry.fluidName === null ? "nil" : luaString(entry.fluidName),
+        luaString(entry.priority),
       ];
-
-      if (entry.fluidName !== null) {
-        base.push(luaString(entry.fluidName));
-      }
 
       remainingEntries -= 1;
       const suffix = remainingEntries > 0 ? "," : "";
@@ -297,6 +324,10 @@ function validateEntry(entry: ItemEntry): void {
     throw new Error("fluidName is required when item name begins with 'drop of'.");
   }
 
+  if (entry.priority !== "standard" && entry.priority !== "low") {
+    throw new Error("priority must be either 'standard' or 'low'.");
+  }
+
   if (entry.group !== null) {
     if (entry.group.trim().length === 0) {
       throw new Error("group cannot be an empty string.");
@@ -351,6 +382,7 @@ export class ConfigStore {
       threshold: entry.threshold,
       batchSize: entry.batchSize,
       fluidName: entry.fluidName,
+      priority: entry.priority,
       group: entry.group === null ? null : entry.group.trim(),
     };
 
