@@ -32,6 +32,7 @@ Optional remote config sync:
 
 - `cfg["config_url"] = "http://<host>:3001/config"` to have `Maintainer.lua` poll and hot-reload config roughly every 60 seconds.
 - Leave `cfg["config_url"] = nil` to use local-only config.
+- `cfg["ignored_crafts"] = {"Fake", "Calib"}` to ignore matching external craft names for low-priority gating. Matches are case-insensitive substring checks, so `"Fake"` matches `"Fake asd1312"`.
 
 **!! Keep in mind that threshold should only be added if necessary and preferrably not in mainnet, since it has a performance impact !!**
 

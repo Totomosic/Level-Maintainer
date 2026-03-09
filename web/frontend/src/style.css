@@ -70,6 +70,71 @@ h2 {
   flex-wrap: wrap;
 }
 
+.mode-section {
+  margin-top: 1rem;
+  padding: 0.7rem;
+  border: 1px solid #2a2f35;
+  border-radius: 8px;
+  background: #161b20;
+}
+
+.mode-title {
+  margin: 0 0 0.45rem;
+  font-size: 0.85rem;
+  color: #a9b0b8;
+}
+
+.mode-toggle {
+  display: inline-flex;
+  gap: 0.5rem;
+}
+
+.mode-icon-button {
+  width: 2.35rem;
+  height: 2.35rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  color: #9ca5af;
+  border: 1px solid #353c44;
+  background: #101418;
+}
+
+.mode-icon-button.item-mode {
+  color: #a1a8b2;
+}
+
+.mode-icon-button.fluid-mode {
+  color: #47a6ff;
+}
+
+.mode-icon-button svg {
+  width: 1.15rem;
+  height: 1.15rem;
+}
+
+.mode-icon-image {
+  width: 1.15rem;
+  height: 1.15rem;
+  image-rendering: pixelated;
+}
+
+.mode-icon-button.active {
+  border-color: #6a7280;
+  background: #2a313a;
+}
+
+.mode-icon-button.item-mode.active {
+  border-color: #8b919c;
+  background: #2b3138;
+}
+
+.mode-icon-button.fluid-mode.active {
+  border-color: #4d80bc;
+  background: #1d2f44;
+}
+
 .item-form {
   margin-top: 1rem;
   display: grid;
@@ -93,6 +158,34 @@ label {
   display: grid;
   gap: 0.4rem;
   font-size: 0.9rem;
+}
+
+.prefixed-input {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.prefixed-input input {
+  width: 100%;
+}
+
+.name-prefix {
+  padding: 0.45rem 0.6rem;
+  border: 1px solid #353c44;
+  border-radius: 8px;
+  background: #0f1317;
+  color: #aeb6bf;
+  white-space: nowrap;
+}
+
+.inline-name-editor {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.mode-select {
+  max-width: 110px;
 }
 
 .inline-with-tooltip {

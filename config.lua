@@ -9,12 +9,16 @@ local cfg = {}
 -- ["drop of Molten SpaceTime"] = {1000000, 1, "spacetime", "low"} -- fluid drop with threshold and fluid name
 
 cfg["items"] = {
-    ["Agar"] = {nil, 1, nil, "standard"},
-    ["Any UEV Circuit"] = {1000000000, 20000, nil, "low"},
-    ["drop of Molten SpaceTime"] = {nil, 1, "spacetime", "standard"}
+    -- @group: Plasmas
+    ["drop of Americium Plasma"] = {nil, 1, "plasma.americium", "standard"},
+    ["drop of Copper Plasma"] = {nil, 1, "plasma.copper", "standard"}
 }
 
 cfg["sleep"] = 10
 cfg["config_url"] = nil -- optional URL to web backend /config endpoint, e.g. "http://localhost:3001/config"
+cfg["ignored_crafts"] = {
+    -- case-insensitive substring matches against active craft names
+    -- "Fake", -- matches "Fake asd1312"
+}
 
 return cfg

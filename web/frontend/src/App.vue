@@ -45,9 +45,12 @@ interface NamingSuggestion {
   suggested: string;
 }
 
+type EntryMode = "item" | "fluid";
+
 interface NamingWarningState {
   context: "add" | "inline";
   originalName: string | null;
+  mode: EntryMode;
   payload: ItemPayload;
   suggestions: NamingSuggestion[];
 }
@@ -63,6 +66,9 @@ const error = ref("");
 const sleepInput = ref("");
 const editingOriginalName = ref<string | null>(null);
 const namingWarning = ref<NamingWarningState | null>(null);
+const formMode = ref<EntryMode>("item");
+const inlineMode = ref<EntryMode>("item");
+const stoneDustIcon = new URL("../icons/stone_dust.png", import.meta.url).href;
 
 const form = reactive({
   name: "",
@@ -82,9 +88,12 @@ const inlineDraft = reactive<ItemEditDraft>({
   group: "",
 });
 
-const canSubmit = computed(() => form.name.trim().length > 0 && form.batchSize.trim().length > 0);
-const addFormRequiresFluid = computed(() => /^drop of\b/i.test(form.name.trim()));
-const inlineRequiresFluid = computed(() => /^drop of\b/i.test(inlineDraft.name.trim()));
+const canSubmit = computed(
+  () =>
+    form.name.trim().length > 0 &&
+    form.batchSize.trim().length > 0 &&
+    (formMode.value === "item" || form.fluidName.trim().length > 0),
+);
 const availableGroups = computed(() => {
   const groups = new Set<string>();
   for (const item of items.value) {
@@ -153,6 +162,33 @@ function formatDisplayNumber(value: number | null): string {
 
 function normalizeSpaces(value: string): string {
   return value.trim().replace(/\s+/g, " ");
+}
+
+function modeFromEntry(name: string, fluidName: string | null): EntryMode {
+  if (fluidName !== null || /^drop of\b/i.test(name.trim())) {
+    return "fluid";
+  }
+  return "item";
+}
+
+function stripDropOfPrefix(name: string): string {
+  const normalized = normalizeSpaces(name);
+  const match = /^drop of\s+(.+)$/i.exec(normalized);
+  if (match) {
+    return match[1];
+  }
+  return normalized;
+}
+
+function buildNameForMode(mode: EntryMode, rawName: string): string {
+  const cleaned = normalizeSpaces(rawName);
+  if (cleaned.length === 0) {
+    return "";
+  }
+  if (mode === "fluid") {
+    return `drop of ${cleaned}`;
+  }
+  return cleaned;
 }
 
 function toTitleCaseWords(value: string): string {
@@ -282,46 +318,57 @@ async function saveSleep(): Promise<void> {
 }
 
 function buildFormPayload(): ItemPayload {
+  const name = buildNameForMode(formMode.value, form.name);
+  const fluidName = formMode.value === "fluid" ? (form.fluidName.trim().length === 0 ? null : form.fluidName.trim()) : null;
+
   return {
-    name: form.name.trim(),
+    name,
     threshold: form.threshold.trim(),
     batchSize: form.batchSize.trim(),
-    fluidName: form.fluidName.trim().length === 0 ? null : form.fluidName.trim(),
+    fluidName,
     priority: form.priority,
     group: form.group.trim().length === 0 ? null : form.group.trim(),
   };
 }
 
 function buildInlinePayload(): ItemPayload {
+  const name = buildNameForMode(inlineMode.value, inlineDraft.name);
+  const fluidName =
+    inlineMode.value === "fluid" ? (inlineDraft.fluidName.trim().length === 0 ? null : inlineDraft.fluidName.trim()) : null;
+
   return {
-    name: inlineDraft.name.trim(),
+    name,
     threshold: inlineDraft.threshold.trim(),
     batchSize: inlineDraft.batchSize.trim(),
-    fluidName: inlineDraft.fluidName.trim().length === 0 ? null : inlineDraft.fluidName.trim(),
+    fluidName,
     priority: inlineDraft.priority,
     group: inlineDraft.group.trim().length === 0 ? null : inlineDraft.group.trim(),
   };
 }
 
 function applyPayloadToForm(payload: ItemPayload): void {
-  form.name = payload.name;
+  const detectedMode = modeFromEntry(payload.name, payload.fluidName);
+  formMode.value = detectedMode;
+  form.name = detectedMode === "fluid" ? stripDropOfPrefix(payload.name) : payload.name;
   form.threshold = payload.threshold;
   form.batchSize = payload.batchSize;
-  form.fluidName = payload.fluidName ?? "";
+  form.fluidName = detectedMode === "fluid" ? (payload.fluidName ?? "") : "";
   form.priority = payload.priority;
   form.group = payload.group ?? "";
 }
 
 function applyPayloadToInline(payload: ItemPayload): void {
-  inlineDraft.name = payload.name;
+  const detectedMode = modeFromEntry(payload.name, payload.fluidName);
+  inlineMode.value = detectedMode;
+  inlineDraft.name = detectedMode === "fluid" ? stripDropOfPrefix(payload.name) : payload.name;
   inlineDraft.threshold = payload.threshold;
   inlineDraft.batchSize = payload.batchSize;
-  inlineDraft.fluidName = payload.fluidName ?? "";
+  inlineDraft.fluidName = detectedMode === "fluid" ? (payload.fluidName ?? "") : "";
   inlineDraft.priority = payload.priority;
   inlineDraft.group = payload.group ?? "";
 }
 
-function validateItemPayload(payload: ItemPayload): string | null {
+function validateItemPayload(payload: ItemPayload, mode: EntryMode): string | null {
   if (payload.name.length === 0) {
     return "Item name is required.";
   }
@@ -330,8 +377,12 @@ function validateItemPayload(payload: ItemPayload): string | null {
     return "Batch size is required.";
   }
 
-  if (/^drop of\b/i.test(payload.name) && (payload.fluidName === null || payload.fluidName.length === 0)) {
-    return "Fluid name is required when item name begins with 'drop of'.";
+  if (mode === "item" && /^drop of\b/i.test(payload.name)) {
+    return "Item mode does not allow names starting with 'drop of'. Switch to fluid mode instead.";
+  }
+
+  if (mode === "fluid" && (payload.fluidName === null || payload.fluidName.length === 0)) {
+    return "Fluid mode requires a fluid name.";
   }
 
   if (payload.priority !== "standard" && payload.priority !== "low") {
@@ -343,6 +394,7 @@ function validateItemPayload(payload: ItemPayload): string | null {
 
 function maybeCreateNamingWarning(
   context: "add" | "inline",
+  mode: EntryMode,
   payload: ItemPayload,
   originalName: string | null,
 ): boolean {
@@ -354,20 +406,21 @@ function maybeCreateNamingWarning(
   namingWarning.value = {
     context,
     originalName,
+    mode,
     payload: { ...payload },
     suggestions,
   };
   return true;
 }
 
-async function submitAddPayload(payload: ItemPayload, skipNamingWarning: boolean): Promise<void> {
-  const validationError = validateItemPayload(payload);
+async function submitAddPayload(payload: ItemPayload, mode: EntryMode, skipNamingWarning: boolean): Promise<void> {
+  const validationError = validateItemPayload(payload, mode);
   if (validationError) {
     error.value = validationError;
     return;
   }
 
-  if (!skipNamingWarning && maybeCreateNamingWarning("add", payload, null)) {
+  if (!skipNamingWarning && maybeCreateNamingWarning("add", mode, payload, null)) {
     return;
   }
 
@@ -395,6 +448,7 @@ async function submitAddPayload(payload: ItemPayload, skipNamingWarning: boolean
     form.fluidName = "";
     form.priority = "standard";
     form.group = "";
+    formMode.value = "item";
     namingWarning.value = null;
 
     await loadConfigPreview();
@@ -411,15 +465,16 @@ async function addItem(): Promise<void> {
   }
 
   const payload = buildFormPayload();
-  await submitAddPayload(payload, false);
+  await submitAddPayload(payload, formMode.value, false);
 }
 
 function startInlineEdit(item: ItemEntry): void {
+  inlineMode.value = modeFromEntry(item.name, item.fluidName);
   editingOriginalName.value = item.name;
-  inlineDraft.name = item.name;
+  inlineDraft.name = inlineMode.value === "fluid" ? stripDropOfPrefix(item.name) : item.name;
   inlineDraft.threshold = item.threshold === null ? "" : formatWithSuffix(item.threshold);
   inlineDraft.batchSize = item.batchSize === null ? "" : formatWithSuffix(item.batchSize);
-  inlineDraft.fluidName = item.fluidName ?? "";
+  inlineDraft.fluidName = inlineMode.value === "fluid" ? (item.fluidName ?? "") : "";
   inlineDraft.priority = item.priority;
   inlineDraft.group = item.group ?? "";
 }
@@ -433,6 +488,23 @@ function activateInlineEdit(item: ItemEntry): void {
 
 function cancelInlineEdit(): void {
   editingOriginalName.value = null;
+}
+
+function onFormModeChange(): void {
+  if (formMode.value === "item") {
+    form.fluidName = "";
+  }
+}
+
+function setFormMode(mode: EntryMode): void {
+  formMode.value = mode;
+  onFormModeChange();
+}
+
+function onInlineModeChange(): void {
+  if (inlineMode.value === "item") {
+    inlineDraft.fluidName = "";
+  }
 }
 
 function groupOptionsForItem(item: ItemEntry): string[] {
@@ -509,15 +581,16 @@ function isFluidItem(item: ItemEntry): boolean {
 async function submitInlinePayload(
   payload: ItemPayload,
   originalName: string,
+  mode: EntryMode,
   skipNamingWarning: boolean,
 ): Promise<void> {
-  const validationError = validateItemPayload(payload);
+  const validationError = validateItemPayload(payload, mode);
   if (validationError) {
     error.value = validationError;
     return;
   }
 
-  if (!skipNamingWarning && maybeCreateNamingWarning("inline", payload, originalName)) {
+  if (!skipNamingWarning && maybeCreateNamingWarning("inline", mode, payload, originalName)) {
     return;
   }
 
@@ -566,7 +639,7 @@ async function saveInlineEdit(): Promise<void> {
 
   const originalName = editingOriginalName.value;
   const payload = buildInlinePayload();
-  await submitInlinePayload(payload, originalName, false);
+  await submitInlinePayload(payload, originalName, inlineMode.value, false);
 }
 
 async function acceptNamingSuggestion(): Promise<void> {
@@ -590,7 +663,7 @@ async function acceptNamingSuggestion(): Promise<void> {
   if (warning.context === "add") {
     applyPayloadToForm(nextPayload);
     namingWarning.value = null;
-    await submitAddPayload(nextPayload, true);
+    await submitAddPayload(nextPayload, warning.mode, true);
     return;
   }
 
@@ -601,7 +674,7 @@ async function acceptNamingSuggestion(): Promise<void> {
 
   applyPayloadToInline(nextPayload);
   namingWarning.value = null;
-  await submitInlinePayload(nextPayload, warning.originalName, true);
+  await submitInlinePayload(nextPayload, warning.originalName, warning.mode, true);
 }
 
 async function rejectNamingSuggestion(): Promise<void> {
@@ -613,7 +686,7 @@ async function rejectNamingSuggestion(): Promise<void> {
   namingWarning.value = null;
 
   if (warning.context === "add") {
-    await submitAddPayload(warning.payload, true);
+    await submitAddPayload(warning.payload, warning.mode, true);
     return;
   }
 
@@ -621,7 +694,7 @@ async function rejectNamingSuggestion(): Promise<void> {
     return;
   }
 
-  await submitInlinePayload(warning.payload, warning.originalName, true);
+  await submitInlinePayload(warning.payload, warning.originalName, warning.mode, true);
 }
 
 async function removeItem(name: string): Promise<void> {
@@ -666,12 +739,14 @@ onMounted(async () => {
         </button>
       </form>
       <p class="hint">
-        Required: item names starting with <code>drop of</code> must include a fluid name. Numeric fields support
-        suffixes <code>k</code>, <code>m</code>, <code>g</code>, <code>t</code>.
+        Pick mode: <code>item</code> keeps normal names, <code>fluid</code> forces <code>drop of</code> names and
+        requires fluid name. Numeric fields support suffixes <code>k</code>, <code>m</code>, <code>g</code>,
+        <code>t</code>.
       </p>
       <p class="hint">
-        Example: name <code>drop of Molten SpaceTime</code>, threshold <code>1m</code>, batch <code>1k</code>, fluid
-        <code>spacetime</code>, priority <code>standard</code>, group <code>AE2 Drops</code>.
+        Example fluid: mode <code>fluid</code>, name <code>Molten SpaceTime</code> (stored as
+        <code>drop of Molten SpaceTime</code>), threshold <code>1m</code>, batch <code>1k</code>, fluid
+        <code>spacetime</code>.
       </p>
 
       <div v-if="namingWarning" class="warning-box">
@@ -686,56 +761,86 @@ onMounted(async () => {
         </div>
       </div>
 
-      <form class="item-form" @submit.prevent="addItem">
-        <label>
-          Item Name
-          <input v-model="form.name" required placeholder="drop of Molten SpaceTime" />
-        </label>
+      <section class="mode-section">
+        <p class="mode-title">Mode</p>
+        <div class="mode-toggle" role="group" aria-label="Entry mode selector">
+          <button
+            class="mode-icon-button item-mode"
+            :class="{ active: formMode === 'item' }"
+            type="button"
+            title="Item mode"
+            aria-label="Item mode"
+            @click="setFormMode('item')"
+          >
+            <img :src="stoneDustIcon" class="mode-icon-image" alt="" aria-hidden="true" />
+          </button>
+          <button
+            class="mode-icon-button fluid-mode"
+            :class="{ active: formMode === 'fluid' }"
+            type="button"
+            title="Fluid mode"
+            aria-label="Fluid mode"
+            @click="setFormMode('fluid')"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                d="M12 3.5C12 3.5 6 10.1 6 14.2C6 17.6 8.7 20.3 12 20.3C15.3 20.3 18 17.6 18 14.2C18 10.1 12 3.5 12 3.5Z"
+                fill="currentColor"
+              />
+            </svg>
+          </button>
+        </div>
+        <form class="item-form" @submit.prevent="addItem">
+          <label>
+            Name
+            <div v-if="formMode === 'fluid'" class="prefixed-input">
+              <span class="name-prefix">drop of</span>
+              <input v-model="form.name" required placeholder="Molten SpaceTime" />
+            </div>
+            <input v-else v-model="form.name" required placeholder="Any UEV Circuit" />
+          </label>
 
-        <label>
-          Threshold (optional)
-          <input v-model="form.threshold" type="text" inputmode="decimal" placeholder="1m" />
-        </label>
+          <label>
+            Threshold (optional)
+            <input v-model="form.threshold" type="text" inputmode="decimal" placeholder="1m" />
+          </label>
 
-        <label>
-          Batch Size
-          <input v-model="form.batchSize" type="text" inputmode="decimal" required placeholder="1 / 1k" />
-        </label>
+          <label>
+            Batch Size
+            <input v-model="form.batchSize" type="text" inputmode="decimal" required placeholder="1 / 1k" />
+          </label>
 
-        <label>
-          Fluid Name
-          <input
-            v-model="form.fluidName"
-            :required="addFormRequiresFluid"
-            :placeholder="addFormRequiresFluid ? 'required for drop of*' : 'spacetime'"
-          />
-        </label>
+          <label v-if="formMode === 'fluid'">
+            Fluid Name
+            <input v-model="form.fluidName" required placeholder="spacetime" />
+          </label>
 
-        <label>
-          <span class="inline-with-tooltip">
-            Priority
-            <span
-              class="info-tooltip"
-              title="standard: normal crafting behavior. low: only crafts when fewer than 10 crafts are active and no non-maintainer crafts are running."
-            >
-              ?
+          <label>
+            <span class="inline-with-tooltip">
+              Priority
+              <span
+                class="info-tooltip"
+                title="standard: normal crafting behavior. low: only crafts when fewer than 10 crafts are active and no non-maintainer crafts are running."
+              >
+                ?
+              </span>
             </span>
-          </span>
-          <select v-model="form.priority">
-            <option value="standard">standard</option>
-            <option value="low">low</option>
-          </select>
-        </label>
+            <select v-model="form.priority">
+              <option value="standard">standard</option>
+              <option value="low">low</option>
+            </select>
+          </label>
 
-        <label>
-          Group (optional)
-          <input v-model="form.group" placeholder="AE2 Drops" />
-        </label>
+          <label>
+            Group (optional)
+            <input v-model="form.group" placeholder="AE2 Drops" />
+          </label>
 
-        <button :disabled="!canSubmit || submitting" type="submit">
-          {{ submitting ? "Saving..." : "Add / Update Item" }}
-        </button>
-      </form>
+          <button :disabled="!canSubmit || submitting" type="submit">
+            {{ submitting ? "Saving..." : "Add / Update Item" }}
+          </button>
+        </form>
+      </section>
 
       <p v-if="error" class="error">{{ error }}</p>
     </section>
@@ -774,14 +879,30 @@ onMounted(async () => {
             <tbody>
               <tr v-for="item in section.items" :key="item.name" :class="isFluidItem(item) ? 'row-fluid' : 'row-item'">
                 <td class="editable-cell" @click="activateInlineEdit(item)">
-                  <input
-                    v-if="editingOriginalName === item.name"
-                    v-model="inlineDraft.name"
-                    type="text"
-                    @click.stop
-                    @keydown.enter.prevent="saveInlineEdit"
-                    @keydown.esc.prevent="cancelInlineEdit"
-                  />
+                  <div v-if="editingOriginalName === item.name" class="inline-name-editor" @click.stop>
+                    <select v-model="inlineMode" class="mode-select" @change="onInlineModeChange">
+                      <option value="item">item</option>
+                      <option value="fluid">fluid</option>
+                    </select>
+                    <div v-if="inlineMode === 'fluid'" class="prefixed-input">
+                      <span class="name-prefix">drop of</span>
+                      <input
+                        v-model="inlineDraft.name"
+                        type="text"
+                        placeholder="Molten SpaceTime"
+                        @keydown.enter.prevent="saveInlineEdit"
+                        @keydown.esc.prevent="cancelInlineEdit"
+                      />
+                    </div>
+                    <input
+                      v-else
+                      v-model="inlineDraft.name"
+                      type="text"
+                      placeholder="Any UEV Circuit"
+                      @keydown.enter.prevent="saveInlineEdit"
+                      @keydown.esc.prevent="cancelInlineEdit"
+                    />
+                  </div>
                   <span v-else>{{ item.name }}</span>
                 </td>
                 <td class="editable-cell" @click="activateInlineEdit(item)">
@@ -812,15 +933,16 @@ onMounted(async () => {
                 </td>
                 <td class="editable-cell" @click="activateInlineEdit(item)">
                   <input
-                    v-if="editingOriginalName === item.name"
+                    v-if="editingOriginalName === item.name && inlineMode === 'fluid'"
                     v-model="inlineDraft.fluidName"
                     type="text"
-                    :required="inlineRequiresFluid"
-                    :placeholder="inlineRequiresFluid ? 'required for drop of*' : '-'"
+                    required
+                    placeholder="spacetime"
                     @click.stop
                     @keydown.enter.prevent="saveInlineEdit"
                     @keydown.esc.prevent="cancelInlineEdit"
                   />
+                  <span v-else-if="editingOriginalName === item.name">-</span>
                   <span v-else>{{ item.fluidName ?? "-" }}</span>
                 </td>
                 <td class="editable-cell" @click="activateInlineEdit(item)">

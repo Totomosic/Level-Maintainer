@@ -5,6 +5,7 @@ local util = require("src.Utility")
 local items = cfg.items or {}
 local sleepInterval = tonumber(cfg.sleep) or 10
 local configUrl = cfg.config_url
+local ignoredCrafts = cfg.ignored_crafts or {}
 
 local internet = nil
 if type(configUrl) == "string" and configUrl ~= "" then
@@ -27,6 +28,39 @@ local function countItems(list)
         count = count + 1
     end
     return count
+end
+
+local function normalizeIgnoredCrafts(rawList)
+    if type(rawList) ~= "table" then
+        return {}
+    end
+
+    local normalized = {}
+    for _, pattern in pairs(rawList) do
+        if type(pattern) == "string" then
+            local trimmed = string.match(pattern, "^%s*(.-)%s*$")
+            if trimmed ~= nil and trimmed ~= "" then
+                normalized[#normalized + 1] = string.lower(trimmed)
+            end
+        end
+    end
+
+    return normalized
+end
+
+local function isIgnoredCraftName(craftName, ignoredPatterns)
+    if type(craftName) ~= "string" then
+        return false
+    end
+
+    local loweredName = string.lower(craftName)
+    for _, pattern in ipairs(ignoredPatterns) do
+        if string.find(loweredName, pattern, 1, true) ~= nil then
+            return true
+        end
+    end
+
+    return false
 end
 
 local function parseConfigString(rawConfig, sourceName)
@@ -60,7 +94,8 @@ local function parseConfigString(rawConfig, sourceName)
     return {
         items = parsed.items,
         sleep = math.floor(parsedSleep + 0),
-        config_url = parsed.config_url
+        config_url = parsed.config_url,
+        ignored_crafts = normalizeIgnoredCrafts(parsed.ignored_crafts)
     }
 end
 
@@ -77,13 +112,13 @@ local function resolvePriority(rawPriority)
     return "standard"
 end
 
-local function getCraftingState(itemsCrafting, configuredItems)
+local function getCraftingState(itemsCrafting, configuredItems, ignoredPatterns)
     local activeCraftingCount = 0
     local hasExternalCrafting = false
 
     for craftingItem in pairs(itemsCrafting) do
         activeCraftingCount = activeCraftingCount + 1
-        if configuredItems[craftingItem] == nil then
+        if configuredItems[craftingItem] == nil and not isIgnoredCraftName(craftingItem, ignoredPatterns) then
             hasExternalCrafting = true
         end
     end
@@ -149,16 +184,18 @@ local function pollRemoteConfig(force)
 
     items = parsed.items
     sleepInterval = parsed.sleep
+    ignoredCrafts = parsed.ignored_crafts or {}
     lastRemoteConfigRaw = body
     logInfo("Remote config updated: " .. tostring(countItems(items)) .. " items, sleep=" .. tostring(sleepInterval))
 end
 
+ignoredCrafts = normalizeIgnoredCrafts(ignoredCrafts)
 pollRemoteConfig(true)
 
 while true do
     pollRemoteConfig(false)
     local itemsCrafting = ae2.checkIfCrafting()
-    local activeCraftingCount, hasExternalCrafting = getCraftingState(itemsCrafting, items)
+    local activeCraftingCount, hasExternalCrafting = getCraftingState(itemsCrafting, items, ignoredCrafts)
 
     for item, config in pairs(items) do
         if type(config) ~= "table" then
