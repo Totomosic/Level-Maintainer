@@ -431,7 +431,6 @@ onMounted(async () => {
   <main class="page">
     <section class="panel">
       <h1>Level Maintainer Config Editor</h1>
-      <p class="muted">Manage <code>cfg["sleep"]</code> and entries in <code>cfg["items"]</code> inside <code>config.lua</code>.</p>
 
       <form class="sleep-form" @submit.prevent="saveSleep">
         <label>
@@ -442,11 +441,14 @@ onMounted(async () => {
           {{ savingSleep ? "Saving..." : "Save Sleep" }}
         </button>
       </form>
-      <p class="hint">Numeric suffixes supported: <code>k</code>, <code>m</code>, <code>g</code>, <code>t</code>.</p>
-      <p class="hint">Click any field in an existing row to edit it inline.</p>
-      <p class="hint">If item name starts with <code>drop of</code>, fluid name is required.</p>
-      <p class="hint">Optional group labels are written as <code>-- @group: ...</code> comments in <code>config.lua</code>.</p>
-      <p class="hint">Use the group dropdown on each row to move items between groups.</p>
+      <p class="hint">
+        Required: item names starting with <code>drop of</code> must include a fluid name. Numeric fields support
+        suffixes <code>k</code>, <code>m</code>, <code>g</code>, <code>t</code>.
+      </p>
+      <p class="hint">
+        Example: name <code>drop of Molten SpaceTime</code>, threshold <code>1m</code>, batch <code>1k</code>, fluid
+        <code>spacetime</code>, group <code>AE2 Drops</code>.
+      </p>
 
       <form class="item-form" @submit.prevent="addItem">
         <label>
